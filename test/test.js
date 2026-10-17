@@ -152,7 +152,9 @@ function mockResult(overrides = {}) {
 const ROUTER_TEST_MODELS = Object.freeze({
   groqFast: 'openai/gpt-oss-120b',
   groqBackup: 'openai/gpt-oss-120b',
-  nvidiaFast: 'moonshotai/kimi-k3',
+  // 📖 Updated (2026-10-17 audit): was 'moonshotai/kimi-k3', removed from NVIDIA
+  // (deprecated 2026-10-14). 'z-ai/glm-5.3' is the current stable NVIDIA slot.
+  nvidiaFast: 'z-ai/glm-5.3',
 })
 
 function listenOnRandomPort(server) {
@@ -1161,8 +1163,8 @@ describe('provider key test model discovery', () => {
         'openai/gpt-oss-120b',
         'z-ai/glm-5.3-flash',
         'z-ai/glm-5.3',
-        'nvidia/nemotron-3-ultra-550b-a55b',
-        'poolside/laguna-xs-2.1',
+        'nvidia/nemotron-3.5-super-vl-120b-a12b',
+        'stepfun-ai/step-5-preview',
       ]
     )
   })
@@ -3342,31 +3344,14 @@ describe('router daemon integration hardening', () => {
     assert.equal(actual.accept, 'application/json')
   })
 
-  it('applies the per-provider schema normalizer before forwarding upstream (zai strips parallel_tool_calls)', async () => {
-    await withMockProvider(() => ({
-      body: { id: 'chatcmpl-zai', choices: [{ message: { role: 'assistant', content: 'ok' } }] },
-    }), async (zaiProvider) => {
-      await withSourceUrls({ zai: zaiProvider.url }, async () => {
-        const config = buildRouterTestConfig([
-          { provider: 'zai', model: 'zai/glm-5.3-flash', priority: 1 },
-        ], { maxRetries: 1 })
-        config.apiKeys.zai = 'zai-test-key'
-        await withRouterTestServer(config, async ({ baseUrl }) => {
-          // 📖 Client (ZCode, Claude Code, Cline…) sends a body with
-          // 📖 parallel_tool_calls=true. GLM rejects this with 422. The
-          // 📖 router must strip it before forwarding.
-          const response = await postRouterChat(baseUrl, { parallel_tool_calls: true })
-          await response.json()
-
-          assert.equal(response.status, 200)
-          assert.equal(zaiProvider.requests.length, 1)
-          const sentBody = zaiProvider.requests[0].body
-          assert.ok(!('parallel_tool_calls' in sentBody), 'parallel_tool_calls must be stripped for zai')
-          assert.equal(sentBody.model, 'glm-5.3-flash', 'zai/ prefix is stripped for upstream')
-        })
-      })
-    })
-  })
+  // 📖 Removed (2026-10-17 audit): the daemon-level zai normalizer subtest
+  // ("applies the per-provider schema normalizer before forwarding upstream").
+  // 📖 The zai provider left the free catalog (GLM Coding Plan went paid-only,
+  // 📖 free window ended 2026-10-07) so the router can no longer route to a zai
+  // 📖 model. The zai request-body normalizer itself is unchanged and stays
+  // 📖 fully covered by the unit suite below ("request body normalization",
+  // 📖 normalizeRequestBody(..., 'zai') cases). Daemon-level normalizer
+  // 📖 coverage lives on via the Mistral temperature-clamp subtest right below.
 
   it('normalizer clamps Mistral temperature > 1 to 1 before forwarding', async () => {
     await withMockProvider(() => ({
@@ -5256,7 +5241,7 @@ describe('endpoint installer', () => {
       const expectedApiKey = getApiKey(config, 'nvidia')
       const result = installProviderEndpoints(config, 'nvidia', 'opencode-desktop', {
         scope: 'selected',
-        modelIds: ['moonshotai/kimi-k3'],
+        modelIds: ['z-ai/glm-5.3'],
         paths,
       })
 
@@ -5265,7 +5250,7 @@ describe('endpoint installer', () => {
       assert.equal(result.modelCount, 1)
       assert.equal(written.provider['fcm-nvidia'].options.apiKey, expectedApiKey)
       assert.deepEqual(written.provider['fcm-nvidia'].models, {
-        'moonshotai/kimi-k3': { name: 'Kimi K3' },
+        'z-ai/glm-5.3': { name: 'GLM 5.3' },
       })
       assert.deepEqual(config.endpointInstalls.map((entry) => ({
         providerKey: entry.providerKey,
@@ -5277,7 +5262,7 @@ describe('endpoint installer', () => {
           providerKey: 'nvidia',
           toolMode: 'opencode',
           scope: 'selected',
-          modelIds: ['moonshotai/kimi-k3'],
+          modelIds: ['z-ai/glm-5.3'],
         },
       ])
     } finally {
